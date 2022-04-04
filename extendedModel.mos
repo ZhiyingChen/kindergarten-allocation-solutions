@@ -1,0 +1,356 @@
+
+model "basic"
+  uses "mmxprs","mmsystem" !gain access to the Xpress-Optimizer solver
+
+  ! ============================================================================
+  ! Reading problem parameters
+  ! ============================================================================
+  filename := "extendedModel_500_25.txt";
+
+  declarations
+    ! Number of children
+    n: integer
+    ! Number of Kindergartens
+    m: integer
+    ! Number of ages
+    nbage = 5
+    ! Number of
+    starttime: real
+    ! Weight
+    ! W : array(1..7) of real
+  end-declarations
+
+  initializations from filename
+    m n ! W
+  end-initializations
+
+  declarations
+  ! Set of children
+  Children = 1 .. n
+  ! Set of Kindergartens
+  Kindergartens = 1 .. m
+  ! Rank
+  rank = 1 .. 3
+  ! Set of ages
+  AgeSet = 1..nbage
+  ! Vector of gender for each child
+  Gender: array(Children) of integer
+  ! Vector of age for each child
+  Age: array(Children) of integer
+  ! whether the child have sibling
+  Priority: array(Children, rank) of integer
+  ! Matrix of distance for each child to each Kindergartens
+  Distance: array(Children, Kindergartens) of integer
+  ! Matrix of whether each child has siblings
+  Siblings: array(Children, Kindergartens) of integer
+  ! The Kindergartens which is the sibling allocated
+  !KSc: array(Children) of integer
+  ! Capacitity of each Kindergartens
+  Q: array(Kindergartens) of integer
+  ! Upper limit on the number of same gender in each kindergarten
+  genderUpperLimit: array(Kindergartens) of integer
+  ! Lower limit on the number of same gender in each kindergarten
+  genderLowerLimit: array(Kindergartens) of integer
+  ! biary age parameter
+  ageBinary: array(Children, AgeSet) of integer
+  ! Upper limit on the number of same age in each kindergarten
+  ageUpperLimit: array(Kindergartens) of integer
+  ! Lower limit on the number of same age in each kindergarten
+  ageLowerLimit: array(Kindergartens) of integer
+
+  ! Priority of each child to each Kindergartens
+  P1: array(Children, Kindergartens) of integer
+  P2: array(Children, Kindergartens) of integer
+  P3: array(Children, Kindergartens) of integer
+
+  ! allocation variable
+  x: array(Children,Kindergartens) of mpvar
+  ! allocation variable
+  x_dummy: array(Children) of mpvar
+  ! To check whether a child is placed to his siblings's school
+  q: array(Children) of mpvar
+  ! placement variable
+  delta1 : array(Kindergartens) of mpvar
+  delta2 : array(Kindergartens) of mpvar
+  delta3 : array(Kindergartens) of mpvar
+  delta: array(Kindergartens) of mpvar
+  end-declarations
+
+  !To calculate objective function
+  declarations
+    K1: array(Children) of integer
+    K2: array(Children) of integer
+    K3: array(Children) of integer
+
+
+    ! Unsatisfied 1,2,3
+    ! do not get priority 1
+    v1: array(Children) of mpvar
+    ! do not get priority 1,2
+    v2: array(Children) of mpvar
+    ! do not get priority 1,2,3
+    v3: array(Children) of mpvar
+
+    ! do not get priority 1,2,3 and distance = D
+    v6: array(Children) of mpvar
+    ! do not get priority 1,2,3 and distance > D
+    v7: array(Children) of mpvar
+  end-declarations
+  ! Read data
+  initializations from filename
+    Priority Distance Siblings Q P1 P2 P3 Gender Age
+  end-initializations
+
+  declarations
+    ! whether gender target is violated for each kindergarten
+    isgender: array(Kindergartens) of mpvar
+    ! whether age target is violated for each kindergarten
+    isage: array(Kindergartens) of mpvar
+    ! maximum distance
+    tmax: mpvar
+  end-declarations
+
+
+  ! Define the upper limit and lower limit on the number of the same gender/age in each kindergarten
+  genderlow := floor(n/(4*m))
+  agelow := floor(n/(10*m))
+  forall(k in Kindergartens) do
+    genderUpperLimit(k) := ceil(Q(k)*3/4)
+    genderLowerLimit(k) := minlist(floor(Q(k)*1/4), genderlow)
+    ageUpperLimit(k) :=  ceil(Q(k)*3/10)
+    ageLowerLimit(k) := minlist(ceil(Q(k)*1/10),agelow)
+  end-do
+
+  ! Define the binary age parameter
+  forall(c in Children) do
+    forall(a in AgeSet) do
+      if (Age(c)=a) then
+        ageBinary(c,a):=1
+      else
+        ageBinary(c,a):=0
+      end-if
+    end-do
+  end-do
+
+
+
+
+
+
+  starttime:= gettime
+
+  ! ============================================================================
+  ! Formulate the model
+  ! ============================================================================
+
+  ! Binary restrictions
+  forall(c in Children, k in Kindergartens) do
+   x(c,k) is_binary
+  end-do
+
+
+  forall(c in Children) do
+   q(c) is_binary
+   x_dummy(c) is_binary
+  end-do
+
+  forall(k in Kindergartens) do
+    delta1(k) is_binary
+    delta2(k) is_binary
+    delta3(k) is_binary
+    delta(k) is_binary
+    isgender(k) is_binary
+    isage(k) is_binary
+  end-do
+
+  forall(c in Children)do
+     K1(c) := Priority(c,1)+1
+     K2(c) := Priority(c,2)+1
+     K3(c) := Priority(c,3)+1
+
+     v1(c) is_binary
+     v2(c) is_binary
+     v3(c) is_binary
+     v6(c) is_binary
+     v7(c) is_binary
+  end-do
+
+
+  ! Every child must be allocated to exactly one Kindergartens (2)
+  forall(c in Children) do
+   sum(k in Kindergartens)x(c,k) + x_dummy(c) = 1
+  end-do
+
+  ! The capacity for each Kindergartens is not exceeded (3)
+  forall(k in Kindergartens)do
+   sum(c in Children)x(c,k) <= Q(k)
+  end-do
+
+  !(4)
+  forall(c in Children) do
+   sum(k in Kindergartens) Siblings(c,k)*(1 - x(c,k)) <= q(c)
+  end-do
+
+  !(5)
+  forall(k in Kindergartens) do
+    sum(c in Children) (P1(c,k)*delta1(k)-x(c,k)) <= 0
+  end-do
+
+  !(6)
+  forall(k in Kindergartens) do
+    sum(c in Children) (P2(c,k)*(delta2(k)- sum(h in Kindergartens)(P1(c,h)*x(c,h)) - x(c,k))) <= 0
+  end-do
+
+  !(7)
+  forall(k in Kindergartens) do
+    sum(c in Children) (P3(c,k)*(delta3(k)- sum(h in Kindergartens)((P1(c,h)+P2(c,h))*x(c,h)) - x(c,k))) <= 0
+  end-do
+
+  !(8)
+  forall(k in Kindergartens)do
+  3*delta(k)-delta1(k)-delta2(k)-delta3(k) <= 0
+  end-do
+
+  !(9)
+  forall(c in Children) do
+    forall(k in Kindergartens) do
+      if (k<>K1(c) and k<>K2(c) and k<>K3(c)) then
+        x(c,k) - delta(k) <= 0
+      end-if
+    end-do
+  end-do
+
+
+  forall(k in Kindergartens) do
+    !(13)
+    sum(c in Children) Gender(c)*x(c,k) <= genderUpperLimit(k)+(Q(k)-genderUpperLimit(k))*isgender(k)
+    !(14)
+    sum(c in Children) Gender(c)*x(c,k) >= genderLowerLimit(k)*(1-isgender(k))
+
+
+  end-do
+
+
+  forall(k in Kindergartens, a in AgeSet) do
+    !(15)
+   sum(c in Children) ageBinary(c,a)*x(c,k) <= ageUpperLimit(k)+(Q(k)-ageUpperLimit(k))*isage(k)
+    !(16)
+    sum(c in Children) ageBinary(c,a)*x(c,k) >= ageLowerLimit(k)*(1-isage(k))
+
+  end-do
+
+  !(17)
+  forall(c in Children) do
+    sum(k in Kindergartens| P1(c,k)=0 and P2(c,k)=0 and P3(c,k)=0) Distance(c,k)*x(c,k) <= tmax
+  end-do
+
+
+  forall(c in Children) do
+    ! v1
+    P1(c,K1(c))-x(c,K1(c))<= v1(c)
+
+    ! v2
+    v2(c) <= P2(c,K2(c))-x(c,K2(c))
+    v2(c) <= P1(c,K1(c))-x(c,K1(c))
+    P2(c,K2(c))-x(c,K2(c))+ P1(c,K1(c))-x(c,K1(c)) <= 1 + v2(c)
+
+    ! v3
+    v3(c) <= P3(c,K3(c))-x(c,K3(c))
+    v3(c) <= P2(c,K2(c))-x(c,K2(c))
+    v3(c) <= P1(c,K1(c))-x(c,K1(c))
+    P3(c,K3(c))-x(c,K3(c))+P2(c,K2(c))-x(c,K2(c))+P1(c,K1(c))-x(c,K1(c))<=2 + v3(c)
+
+    ! v6
+    forall (k in Kindergartens) do
+      if (Distance(c,k) = 2) then
+        v3(c) + x(c,k) <= v6(c)+1
+      end-if
+    end-do
+
+    ! v7
+    forall (k in Kindergartens) do
+      if (Distance(c,k) > 2) then
+        v3(c) + x(c,k) <= v7(c) + 1
+      end-if
+    end-do
+
+  end-do
+
+  ! Objective function ...
+  W1 := 0.27
+  W2 := 0.03
+  W3 := 0.06
+  W4 := 0.09
+  W5 := 0.26
+  W6 := 0.02
+  W7 := 0.04
+  W8 := 0.11
+  W9 := 0.10
+  W10 := 0.01
+
+  z := sum(c in Children) (W1*x_dummy(c)+ W2*v1(c) + W3*v2(c)+ W4*v3(c) + W5*q(c) + W6* v6(c)+  W7* v7(c)) + W8*sum(k in Kindergartens)isgender(k)+ W9*sum(k in Kindergartens)isage(k)+W10*tmax
+
+  ! Solve the problem ...
+  minimise(z)
+
+
+
+  ! ============================================================================
+  ! Print the results
+  ! ============================================================================
+
+  writeln("The result of allocation for each child: ")
+  forall(c in Children) do
+    write(c-1,": ")
+    forall(k in Kindergartens |x(c,k).sol > 0.01)do
+     write(k-1)
+
+    end-do
+    writeln
+  end-do
+  writeln; writeln
+  writeln("Time: ",gettime-starttime)
+  available_place_num := sum(k in Kindergartens) Q(k)
+  writeln("There are ", available_place_num, " available places in total.")
+  writeln("Total scores: ", getobjval)
+
+  unallocated_num := sum(c in Children ) x_dummy(c).sol
+  writeln("The number of unllocated kids is ", unallocated_num)
+
+  not_get_1_num := sum(c in Children) v1(c).sol
+  writeln("The number of kids not placed in Priority top 1 is ", not_get_1_num)
+
+  not_get_2_num := sum(c in Children) v2(c).sol
+  writeln("The number of kids not placed in Priority top 2 is ", not_get_2_num)
+
+  not_get_3_num := sum(c in Children) v3(c).sol
+  writeln("The number of kids not placed in Priority top 3 is ", not_get_3_num)
+
+  not_with_sibling_num := sum(c in Children) q(c).sol
+  writeln("The number of kids not placed with their siblings is ", not_with_sibling_num)
+
+  voilated_gender_num := sum(k in Kindergartens) isgender(k).sol
+  writeln("The number of kindergartens whose gender target is voilated: ", voilated_gender_num)
+
+  voilated_age_num := sum(k in Kindergartens) isage(k).sol
+  writeln("The number of kindergartens whose age target is voilated: ", voilated_age_num)
+
+  writeln("The maximum distance is ", tmax.sol)
+
+
+  !
+  forall(k in Kindergartens) do
+    totalNum := sum(c in Children) x(c,k).sol
+    boysNum:= sum(c in Children|x(c,k).sol=1) Gender(c).sol
+    girlsNum:=totalNum- boysNum
+    writeln(k,": ",totalNum,", ",boysNum,", ",girlsNum)
+  end-do
+
+  !Distance for child who are not allocated to top1&2&3
+  forall(c in Children)do
+      forall(k in Kindergartens |x(c,k).sol > 0.01 and v3(c).sol>0)do
+        writeln("Distance of Nontop-3 child ",c," is :",Distance(c,k))
+      end-do
+  end-do
+
+end-model

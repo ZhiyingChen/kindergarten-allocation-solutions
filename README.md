@@ -4,6 +4,7 @@
 
 Allocation of children to kindergartens in Norway  
 This is a realization of Kindergarten allocation in Norway: An integer programming approach (2021), Journal of the Operational Research Society.  
+All data are simulated as stated in report.pdf.
 
 **Environment Deployment**
 
